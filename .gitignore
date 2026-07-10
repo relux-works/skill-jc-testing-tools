@@ -1,0 +1,37 @@
+# Binaries
+tools/jc-harness/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go build cache / test binary
+*.test
+*.out
+
+# Local task-board runtime (workflow state, keep the board dir itself but not scratch)
+.task-board/.resources/**/*.tmp
+
+# Local agent runtime (installed copies live in ~/.agents, ~/.claude, ~/.codex)
+.agents/
+.roles/
+.claude/
+.codex/
+.local/
+.temp/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+
+# This repo's own local task-board (tracked separately, not part of the skill content)
+.task-board/
+task-board.config.json
+
+# Build output
+tools/jc-harness/bin/
+tools/gp-t0-helper/build/
