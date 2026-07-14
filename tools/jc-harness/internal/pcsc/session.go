@@ -127,6 +127,21 @@ func (s *Session) Select(aid []byte) ([]byte, error) {
 	return s.Transmit(cmd)
 }
 
+// Reset performs a warm reset (SCardReconnect with ResetCard), returning the
+// card to its power-on default selection. A card retains its selected
+// application/file across a plain LeaveCard disconnect, so after any AID
+// SELECT (e.g. a HelloApplet call) the classic-GSM file system becomes
+// unreachable (CLA=0xA0 -> 6E00 "class not supported") until the card is
+// reset -- this makes a read-off-the-GSM-filesystem step idempotent
+// regardless of what selection a previous session left behind. T=0 stays
+// forced across the reconnect.
+func (s *Session) Reset() error {
+	if err := s.card.Reconnect(scard.ShareExclusive, scard.ProtocolT0, scard.ResetCard); err != nil {
+		return fmt.Errorf("warm reset (reconnect): %w", err)
+	}
+	return nil
+}
+
 // ATR returns the card's Answer-To-Reset bytes.
 func (s *Session) ATR() ([]byte, error) {
 	status, err := s.card.Status()

@@ -57,6 +57,8 @@ func main() {
 		result, err = cmdSelect(os.Args[2:])
 	case "smoke":
 		result, err = cmdSmoke(os.Args[2:])
+	case "seq":
+		result, err = cmdSeq(os.Args[2:])
 	case "help", "-h", "--help":
 		usage()
 		return
@@ -112,6 +114,16 @@ Usage:
   jc-harness smoke --reader NAME --aid HEX --apdu HEX[,HEX...]
       SELECT, then send each APDU in sequence.
       -> {"reader": ..., "select": {...}, "results": [{...}, ...]}
+
+  jc-harness seq --reader NAME [--reset] --apdu HEX[,HEX...]
+      Connect once (T=0 forced), then send each APDU in order within that one
+      session -- no implicit SELECT. Selection/file-system state set by one
+      APDU persists to the next (e.g. classic-GSM SELECT MF -> DF -> EF ->
+      READ BINARY, or a raw-read-then-reselect-AID provisioning flow).
+      --reset warm-resets the card first (clears any selection a previous
+      session left behind -- needed to reach the GSM file system after a
+      prior AID SELECT).
+      -> {"reader": ..., "results": [{...}, ...]}
 
 --reader takes a case-insensitive substring match against "jc-harness readers"
 output (e.g. "OMNIKEY"), not necessarily the exact full name.
@@ -259,13 +271,92 @@ func cmdSmoke(args []string) (any, error) {
 		return nil, err
 	}
 
-	results := make([]apduResult, 0, len(strings.Split(apdusArg, ",")))
-	for _, apduHex := range strings.Split(apdusArg, ",") {
-		apduHex = strings.TrimSpace(apduHex)
-		cmd, err := decodeHexFlag("--apdu", apduHex)
+	cmds, err := parseAPDUSequence(apdusArg)
+	if err != nil {
+		return nil, err
+	}
+	results, err := transmitSequence(sess, cmds)
+	if err != nil {
+		return nil, err
+	}
+
+	return smokeResult{Reader: sess.ReaderName, Select: selResult, Results: results}, nil
+}
+
+type seqResult struct {
+	Reader  string       `json:"reader"`
+	Results []apduResult `json:"results"`
+}
+
+// cmdSeq transmits an ordered list of raw APDUs over one T=0-forced session
+// with NO implicit SELECT -- the generic stateful primitive that `smoke`
+// specializes (smoke = SELECT AID, then this). It exists because some real
+// flows must own the whole session from the first APDU: reading a card's
+// classic-GSM file system (CLA=0xA0 SELECT MF -> DF_GSM -> EF_IMSI -> READ
+// BINARY) needs the file-selection chain to persist across APDUs within one
+// connection, and a leading AID SELECT (as smoke forces) would put the card
+// in a mutually-exclusive application context. `apdu` can't be chained for
+// this either -- it reconnects per call and loses all selection state.
+func cmdSeq(args []string) (any, error) {
+	reader, err := requireFlag(args, "--reader", "seq")
+	if err != nil {
+		return nil, err
+	}
+	apdusArg, err := requireFlag(args, "--apdu", "seq")
+	if err != nil {
+		return nil, err
+	}
+	cmds, err := parseAPDUSequence(apdusArg)
+	if err != nil {
+		return nil, err
+	}
+
+	sess, err := pcsc.Connect(reader)
+	if err != nil {
+		return nil, err
+	}
+	defer sess.Close()
+
+	// --reset: warm-reset the card before the first APDU, clearing any
+	// selection a previous session left behind (a card keeps its selected
+	// application across a LeaveCard disconnect). Required to reach the
+	// classic-GSM file system after any prior AID SELECT.
+	if hasFlag(args, "--reset") {
+		if err := sess.Reset(); err != nil {
+			return nil, err
+		}
+	}
+
+	results, err := transmitSequence(sess, cmds)
+	if err != nil {
+		return nil, err
+	}
+	return seqResult{Reader: sess.ReaderName, Results: results}, nil
+}
+
+// parseAPDUSequence splits a comma-separated --apdu argument into decoded
+// command byte slices, failing hard (never silently skipping) on any element
+// that is not valid, non-empty hex.
+func parseAPDUSequence(apdusArg string) ([][]byte, error) {
+	parts := strings.Split(apdusArg, ",")
+	cmds := make([][]byte, 0, len(parts))
+	for _, apduHex := range parts {
+		cmd, err := decodeHexFlag("--apdu", strings.TrimSpace(apduHex))
 		if err != nil {
 			return nil, err
 		}
+		cmds = append(cmds, cmd)
+	}
+	return cmds, nil
+}
+
+// transmitSequence sends each command in order over the already-open session,
+// collecting one apduResult per command. A transmit or malformed-response
+// error aborts the whole sequence -- a partial hardware sequence with a
+// swallowed mid-stream fault would be worse than a hard stop.
+func transmitSequence(sess *pcsc.Session, cmds [][]byte) ([]apduResult, error) {
+	results := make([]apduResult, 0, len(cmds))
+	for _, cmd := range cmds {
 		resp, err := sess.Transmit(cmd)
 		if err != nil {
 			return nil, err
@@ -276,8 +367,7 @@ func cmdSmoke(args []string) (any, error) {
 		}
 		results = append(results, r)
 	}
-
-	return smokeResult{Reader: sess.ReaderName, Select: selResult, Results: results}, nil
+	return results, nil
 }
 
 func toAPDUResult(resp []byte) (apduResult, error) {
@@ -287,6 +377,16 @@ func toAPDUResult(resp []byte) (apduResult, error) {
 	sw := resp[len(resp)-2:]
 	data := resp[:len(resp)-2]
 	return apduResult{SW: hex.EncodeToString(sw), Data: hex.EncodeToString(data)}, nil
+}
+
+// hasFlag reports whether a valueless boolean flag (e.g. --reset) is present.
+func hasFlag(args []string, name string) bool {
+	for _, a := range args {
+		if a == name {
+			return true
+		}
+	}
+	return false
 }
 
 // requireFlag returns the value following name in args, or a hard error

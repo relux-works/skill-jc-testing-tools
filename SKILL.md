@@ -94,6 +94,16 @@ jc-harness atr --reader OMNIKEY
 
 jc-harness smoke --reader OMNIKEY --aid F0000000AA01 --apdu B0010000...,B0020000
 # {"reader": "...", "select": {"sw": "9000", "data": ""}, "results": [{"sw": "9000", "data": "..."}, ...]}
+
+# seq: send a raw APDU sequence over ONE session with no implicit SELECT --
+# the generic stateful primitive smoke specializes. Selection/file-system
+# state persists across APDUs, so this is what you use to read a card's
+# classic-GSM file system (CLA=0xA0 SELECT MF -> DF_GSM -> EF_IMSI -> READ
+# BINARY) or any raw-read-then-reselect-AID provisioning flow that a leading
+# AID SELECT would break. (`apdu` can't be chained for this -- it reconnects
+# per call and loses selection state.)
+jc-harness seq --reader OMNIKEY --apdu A0A4000002 3F00,A0A4000002 7F20,A0A4000002 6F07,A0B0000009
+# {"reader": "...", "results": [{"sw": "9f0f", "data": ""}, ..., {"sw": "9000", "data": "08..."}]}
 ```
 
 Every command prints one JSON object/array to stdout, success or `{"error": "..."}` on failure -- no flag has a default, missing a required flag is a hard, specific error. See `tools/jc-harness/main.go`'s package doc for the full design rationale (including why this does *not* adopt the full `agent-facing-api` query-DSL pattern -- there's no multi-entity dataset here to project/filter against, just a handful of imperative hardware actions).
