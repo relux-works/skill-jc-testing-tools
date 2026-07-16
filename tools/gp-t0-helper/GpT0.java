@@ -23,14 +23,31 @@ import java.util.EnumSet;
  *   list                                    -- read-only discover + registry dump
  *   install <cap> <pkgAid> <appletAid> <instanceAid> <kic> <kid> <kik>
  *                                            -- open secure channel, LOAD cap, INSTALL applet
+ *   secure-apdu <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex> <apduHex>...
+ *                                            -- open secure channel, send authenticated APDUs
  *   apdu <cla> <ins> <p1> <p2> [dataHex]     -- raw APDU after plain SELECT (no secure channel)
  */
 public class GpT0 {
 
     public static void main(String[] args) throws Exception {
+        // GlobalPlatformPro logs diversified/session keys at INFO. Keep helper
+        // output safe by default while allowing an explicit JVM property to
+        // opt back into verbose library logging for local diagnostics.
+        if (System.getProperty("org.slf4j.simpleLogger.defaultLogLevel") == null) {
+            System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", "warn");
+        }
+
         if (args.length < 1) {
-            System.err.println("usage: list | install <cap> <pkgAid> <appletAid> <instanceAid> <kic> <kid> <kik> | apdu <cla> <ins> <p1> <p2> [dataHex]");
+            printUsage();
             System.exit(2);
+        }
+        if ("secure-apdu".equals(args[0])) {
+            try {
+                validateSecureApduArgs(args);
+            } catch (IllegalArgumentException e) {
+                System.err.println(e.getMessage());
+                System.exit(2);
+            }
         }
 
         CardTerminal terminal = findReader();
@@ -68,6 +85,9 @@ public class GpT0 {
                 case "install":
                     doInstall(apduBibo, args);
                     break;
+                case "secure-apdu":
+                    doSecureApdu(apduBibo, args);
+                    break;
                 case "apdu":
                     doApdu(apduBibo, args);
                     break;
@@ -83,6 +103,32 @@ public class GpT0 {
             }
         } finally {
             card.disconnect(true);
+        }
+    }
+
+    private static void printUsage() {
+        System.err.println("usage: list | trysc <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex>"
+                + " | install <cap> <pkgAid> <appletAid> <instanceAid> <kic> <kid> <kik> [keyVersionHex scpName iHex]"
+                + " | secure-apdu <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex> <apduHex>..."
+                + " | delete <aidHex> <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex>"
+                + " | apdu <cla> <ins> <p1> <p2> [dataHex]");
+    }
+
+    static void validateSecureApduArgs(String[] args) {
+        if (args.length < 8) {
+            throw new IllegalArgumentException(
+                    "secure-apdu <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex> <apduHex>...");
+        }
+        hex(args[1]);
+        hex(args[2]);
+        hex(args[3]);
+        Integer.parseInt(args[4], 16);
+        GPSecureChannelVersion.SCP.valueOf(args[5]);
+        Integer.parseInt(args[6], 16);
+        for (int i = 7; i < args.length; i++) {
+            if (hex(args[i]).length < 4) {
+                throw new IllegalArgumentException("APDU[" + (i - 7) + "] must contain at least CLA/INS/P1/P2");
+            }
         }
     }
 
@@ -144,6 +190,38 @@ public class GpT0 {
         session.installAndMakeSelectable(pkgAid, appletAid, instanceAid,
                 EnumSet.noneOf(GPRegistryEntry.Privilege.class), new byte[0]);
         System.out.println("Applet installed and made selectable: " + instanceAid);
+    }
+
+    /** Open a secure channel and send caller-supplied APDUs through GP secure messaging. */
+    private static void doSecureApdu(APDUBIBO bibo, String[] args) throws Exception {
+        byte[] kic = hex(args[1]);
+        byte[] kid = hex(args[2]);
+        byte[] kik = hex(args[3]);
+        int keyVersion = Integer.parseInt(args[4], 16);
+        String scpName = args[5];
+        int scpI = Integer.parseInt(args[6], 16);
+
+        GPSession session = GPSession.discover(bibo);
+        PlaintextKeys keys = PlaintextKeys.fromKeys(kic, kid, kik);
+        keys.setVersion(keyVersion);
+        GPSecureChannelVersion scpVersion = new GPSecureChannelVersion(
+                GPSecureChannelVersion.SCP.valueOf(scpName), scpI);
+        session.openSecureChannel(keys, scpVersion, null, GPSession.defaultMode);
+        System.out.println("Secure channel opened: " + scpVersion
+                + " keyVersion=0x" + Integer.toHexString(keyVersion));
+
+        for (int i = 7; i < args.length; i++) {
+            apdu4j.core.CommandAPDU command = new apdu4j.core.CommandAPDU(hex(args[i]));
+            apdu4j.core.ResponseAPDU response = session.transmit(command);
+            int index = i - 7;
+            System.out.println("APDU[" + index + "] -> SW="
+                    + String.format("%04X", response.getSW())
+                    + " data=" + toHex(response.getData()));
+            if (response.getSW() != 0x9000) {
+                throw new IllegalStateException("APDU[" + index + "] failed with SW="
+                        + String.format("%04X", response.getSW()));
+            }
+        }
     }
 
     /**
@@ -246,7 +324,10 @@ public class GpT0 {
         System.out.println("SW=" + Integer.toHexString(resp.getSW()) + " data=" + toHex(resp.getData()));
     }
 
-    private static byte[] hex(String s) {
+    static byte[] hex(String s) {
+        if ((s.length() & 1) != 0) {
+            throw new IllegalArgumentException("hex value must contain an even number of characters");
+        }
         int n = s.length() / 2;
         byte[] b = new byte[n];
         for (int i = 0; i < n; i++) {

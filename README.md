@@ -21,7 +21,26 @@ jc-harness smoke --reader OMNIKEY --aid <hex> --apdu <hex>[,<hex>...]
 
 gp-t0-helper trysc <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex>
 gp-t0-helper install <cap> <pkgAid> <appletAid> <instanceAid> <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex>
+gp-t0-helper secure-apdu <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex> <apduHex> [<apduHex>...]
 ```
+
+`secure-apdu` sends the supplied commands in order through GlobalPlatformPro's
+authenticated secure-messaging wrapper while retaining the helper's forced
+T=0 card connection. It stops at the first response other than `SW=9000`.
+Library logging defaults to `warn` so static, diversified, and session keys are
+not printed; set the standard `org.slf4j.simpleLogger.defaultLogLevel` JVM
+property explicitly when verbose local diagnostics are required.
+
+## Development validation
+
+```bash
+cd tools/gp-t0-helper
+javac -cp gp.jar -d build GpT0.java GpT0Test.java
+java -cp "build:gp.jar" GpT0Test
+```
+
+The compiled classes stay under `tools/gp-t0-helper/build/`. Physical-card
+validation uses the installed `gp-t0-helper` and `jc-harness` commands above.
 
 ## Working on this repo
 
