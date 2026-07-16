@@ -5,3 +5,8 @@ This product includes software developed by Alexey Grigorev
 (https://github.com/relux-works/skill-jc-testing-tools).
 
 Licensed under the Apache License, Version 2.0.
+
+This repository redistributes an unmodified binary of GlobalPlatformPro
+(tools/gp-t0-helper/gp.jar), Copyright Martin Paljak, licensed under the
+GNU Lesser General Public License v3.0. Source code and license text:
+https://github.com/martinpaljak/GlobalPlatformPro
