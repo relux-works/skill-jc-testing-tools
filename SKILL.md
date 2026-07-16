@@ -131,6 +131,38 @@ java --add-modules java.smartcardio -cp "build:gp.jar" GpT0 delete <aidHex> <kic
 
 ---
 
+## `android-omapi-probe.sh`: Android OMAPI readiness
+
+The final dev-cycle stage -- talking to your installed applet from a real Android app
+over OMAPI (`android.se.omapi`) instead of the host PC/SC reader -- has device- and
+card-dependent failure modes that are non-obvious and eat real time. `scripts/android-omapi-probe.sh`
+diagnoses them from the host over `adb`.
+
+```bash
+# static readiness (no app needed): API>=28, .uicc feature, which slot has the card
+scripts/android-omapi-probe.sh                 # auto-pick the single physical device
+scripts/android-omapi-probe.sh --serial <sn>
+# tail live OMAPI signals while your app/test runs: getReader / isSecureElementPresent / AccessControlEnforcer
+scripts/android-omapi-probe.sh --serial <sn> --watch
+```
+
+Two barriers show up here, in order, each with a distinct error (full detail in
+[references/android-omapi-readiness.md](references/android-omapi-readiness.md)):
+
+1. **Card in the wrong SIM slot** -> `No OMAPI reader with a secure element is available`.
+   Most vendor firmware exposes only the `SIM1` OMAPI reader regardless of the card's
+   slot; move the card to slot 1. (OMAPI *can* address slots by reader name `SIM1`/`SIM2`,
+   but exposing a per-slot reader is vendor-optional -- it's a firmware gap, not your app.)
+2. **On-card access control (SEAC), no rules** -> `AccessControlEnforcer: No ARF exists` ->
+   `Deny any access`. The channel physically opens, then Android denies because the card
+   carries no ARA-M/ARF access rule for your app's signing cert. Fix is **card-side**:
+   provision an ARA-M applet with a grant rule (via `gp-t0-helper`), not an app change.
+
+This is host-side `adb` tooling on purpose -- it is deliberately a standalone script,
+not part of the PC/SC-only `jc-harness` Go binary.
+
+---
+
 ## References
 
 | File | Covers |
@@ -142,6 +174,7 @@ java --add-modules java.smartcardio -cp "build:gp.jar" GpT0 delete <aidHex> <kic
 | [references/gp-t0-driver-pattern.md](references/gp-t0-driver-pattern.md) | Why GlobalPlatformPro's CLI can't be used directly, and the library-mode workaround |
 | [references/codegen-jc-classic-compatibility.md](references/codegen-jc-classic-compatibility.md) | Exact rules generated/hand-written applet code must follow to convert on real Java Card Classic |
 | [references/cap-build-toolchain.md](references/cap-build-toolchain.md) | `ant-javacard` setup, JDK-version-per-kit gotchas, `ints="true"` |
+| [references/android-omapi-readiness.md](references/android-omapi-readiness.md) | Android OMAPI readiness: feature flags, SIM-slot exposure reality, and the wrong-slot + on-card-access-control barriers (with `android-omapi-probe.sh`) |
 
 ---
 
