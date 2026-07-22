@@ -1,9 +1,9 @@
 # Applet file access: FileView, Access Domain and the issuer grant
 
 How an applet reads the card's own files (EF_IMSI, EF_ICCID, ...) natively, why
-that needs an issuer grant, and what the grant physically is. This is "Path A"
-(read the live file in-applet) versus "Path B" (host reads the file over the
-reader and provisions a copy into the applet).
+that needs an issuer grant, and -- importantly -- why having the install keys is
+**not** what unblocks it. This is "Path A" (read the live file in-applet) versus
+"Path B" (host reads the file over the reader and provisions a copy).
 
 ## The problem
 
@@ -15,39 +15,57 @@ defines `uicc.access.FileView`, which lets an applet `SELECT` / `READ BINARY` /
 applet using it does not collide with the terminal's selected applet/file.
 
 That is the live, authoritative, profile-swap-proof way to serve identity: the
-MNO updates the EF, the read reflects it, no provisioning. But it only works if
-two things both hold.
+MNO updates the EF, the read reflects it, no provisioning.
 
-## Two prerequisites, both required
+## Three gates, in order -- and keys only open the last one
 
-1. **The COS actually implements the `uicc.access` package.** This is a
-   card-build property, not something granted per applet. If the platform does
-   not expose the API, there is no in-applet file read at all. On an
-   unidentified test UICC (all-`FF` CPLC, no vendor docs) treat it as unknown /
-   unavailable until proven.
-2. **The applet is granted an Access Domain** permitting those files. This is
-   the issuer grant, and it is the part people mean by "issuer gives my applet
-   rights".
+The tempting mental model is "we have the install keys, so we just pass the
+applet a descriptor that lets it read EF_IMSI/EF_ICCID." That is backwards about
+where the block is. Path A has **three** gates, and they fail in this order:
+
+1. **Build gate -- export files.** To write an applet that calls
+   `uicc.access.FileView`, the Java Card converter needs the `uicc.access`
+   **export files (`.exp`)** for the card's COS version, to link against. Without
+   them the applet does not convert. Keys do not give you export files.
+2. **Install gate -- the package must exist in the COS.** `uicc.access` is a
+   card-build feature. An applet that imports the package will not install on a
+   card whose OS does not ship it -- the imported package AID does not resolve
+   and the install fails with a linking error. Keys do not add an OS package
+   that is not there. (On an unidentified test UICC -- all-`FF` CPLC, no vendor
+   docs -- you cannot even confirm the package is present.)
+3. **Grant gate -- the Access Domain.** Only now does the descriptor matter: the
+   applet is installed with an **Access Domain** in its install parameters that
+   permits the files. **This is the step the keys enable** -- and it is the last
+   and easiest one.
+
+So the block is at gates 1-2 (does the API exist on this card, and can we even
+compile against it), **not** at gate 3. Passing the Access Domain descriptor was
+never the hard part; there is just no API on the card to grant access through,
+and nothing to build the applet from.
+
+Analogy: you have **admin rights** (keys) to install a program that calls a
+system library, but the OS does not ship that library (gate 2) and you do not
+have its headers to compile your program (gate 1). Admin rights conjure neither.
+The Access Domain is "permission to use the library" -- meaningless when there
+is no library and no way to build against it.
 
 ## The grant is an Access Domain, not a key
 
-Two different things are easy to conflate:
+Two things people conflate:
 
 - **Secure-channel / SD keys** (KIC/KID/KIK, or a Security Domain's keys)
-  authenticate **who** performs the install -- they prove you are allowed to
-  install on this card. They open the GlobalPlatform secure channel. The issuer
-  holds them, or delegates a Security Domain that carries its own keys.
+  authenticate **who** performs the install. They open the GlobalPlatform secure
+  channel and prove you may install. The issuer holds them, or delegates a
+  Security Domain that carries its own keys.
 - **Access Domain** (ETSI **TS 102 226**, in the "UICC System Specific
-  Parameters" carried inside the GP `INSTALL [for install]` application-specific
+  Parameters" inside the GP `INSTALL [for install]` application-specific
   parameters) declares **what** the applet may access. It is a permission
-  descriptor, not crypto: e.g. `00` = full access (still subject to the file's
-  native ADM conditions), `FF` = no access, plus an Access Domain DAP for
-  granular rules. The COS checks it against each file's native access conditions
-  on **every** FileView operation (TS 102 241 requires this).
+  descriptor, not crypto: `00` = full access (still subject to the file's native
+  ADM conditions), `FF` = no access, plus an Access Domain DAP for granular
+  rules. The COS checks it against each file's native access conditions on
+  **every** FileView operation (TS 102 241 requires this).
 
-So: **keys = "I am allowed to grant", Access Domain = "the grant itself".**
-Install the same applet without the right keys and the card either refuses the
-install or refuses to set a privileged Access Domain.
+**keys = "I am allowed to grant", Access Domain = "the grant itself".**
 
 ```
 GP INSTALL [for install]
@@ -89,23 +107,26 @@ Path B.
 
 ## Where this leaves the dev cycle
 
-- **No grant (or unconfirmed `uicc.access`) -> Path B.** The host reads the real
-  EF over the reader (classic file access, `jc-harness`: `SELECT MF -> [DF_GSM
-  ->] EF -> READ BINARY`) and injects a copy into the applet -- via a runtime
-  setter APDU or an install parameter. It is a snapshot: it goes stale on a
-  profile swap, and its trust equals whoever provisioned it. Setter vs install
-  param is throwaway demo scaffolding; the only real difference is that an
-  install parameter has no unauthenticated runtime write surface and rides the
-  GP secure channel for free.
-- **Grant + FileView -> Path A.** The applet reads the live EF directly. No
-  provisioning, profile-swap-proof by construction, and the whole set-vs-install
-  provisioning question evaporates.
+- **Gates 1-2 unmet (or unconfirmed) -> Path B.** The host reads the real EF over
+  the reader (classic file access, `jc-harness`: `SELECT MF -> [DF_GSM ->] EF ->
+  READ BINARY`) and injects a copy into the applet -- via a runtime setter APDU
+  or an install parameter. It is a snapshot: it goes stale on a profile swap, and
+  its trust equals whoever provisioned it. Setter vs install param is throwaway
+  demo scaffolding; the only real difference is that an install parameter has no
+  unauthenticated runtime write surface and rides the GP secure channel for free.
+- **All three gates met -> Path A.** The applet reads the live EF directly. No
+  provisioning, profile-swap-proof by construction, and the whole
+  set-vs-install provisioning question evaporates.
 
 ## On a test UICC with no issuer relationship
 
-Path A is untestable until the vendor / issuer either (a) confirms `uicc.access`
-is present and installs your applet with an Access Domain that grants the EF
-read, or (b) hands over ADM / SD keys plus the API docs so you can install with
-the Access Domain yourself. Until then Path B is the only reality, and its
-provisioning mechanism is scaffolding that the FileView read replaces once the
-grant lands.
+Path A is untestable until the vendor / issuer provides, in order:
+
+1. confirmation that the COS ships `uicc.access`,
+2. the **export files** for that package/COS version so you can build the applet,
+3. then your **keys** install it with an Access Domain that grants the EF read.
+
+Item 3 is the part install keys already cover; items 1 and 2 are the ones you
+are missing on a test card, and no amount of key material substitutes for them.
+Until they land, Path B is the only reality, and its provisioning mechanism is
+scaffolding that the FileView read replaces once the gates open.
