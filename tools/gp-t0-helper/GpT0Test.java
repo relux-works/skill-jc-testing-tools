@@ -4,7 +4,20 @@ public class GpT0Test {
     public static void main(String[] args) {
         testHexParsing();
         testSecureApduValidation();
+        testDeleteIfPresentClassification();
         System.out.println("GpT0Test PASS");
+    }
+
+    private static void testDeleteIfPresentClassification() {
+        if (!GpT0.isDeleteAlreadyAbsent(new pro.javacard.gp.GPException(0x6A88, "not found"))) {
+            throw new AssertionError("6A88 must be treated as already absent");
+        }
+        if (GpT0.isDeleteAlreadyAbsent(new pro.javacard.gp.GPException(0x6A86, "bad parameters"))) {
+            throw new AssertionError("6A86 must remain a hard delete failure");
+        }
+        if (GpT0.isDeleteAlreadyAbsent(new pro.javacard.gp.GPException("transport failure"))) {
+            throw new AssertionError("non-SW GP failures must remain hard failures");
+        }
     }
 
     private static void testHexParsing() {

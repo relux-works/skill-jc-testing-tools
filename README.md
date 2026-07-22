@@ -22,6 +22,7 @@ jc-harness smoke --reader OMNIKEY --aid <hex> --apdu <hex>[,<hex>...]
 gp-t0-helper trysc <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex>
 gp-t0-helper install <cap> <pkgAid> <appletAid> <instanceAid> <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex>
 gp-t0-helper secure-apdu <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex> <apduHex> [<apduHex>...]
+gp-t0-helper delete-if-present <aidHex> <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex>
 ```
 
 `secure-apdu` sends the supplied commands in order through GlobalPlatformPro's
@@ -30,6 +31,13 @@ T=0 card connection. It stops at the first response other than `SW=9000`.
 Library logging defaults to `warn` so static, diversified, and session keys are
 not printed; set the standard `org.slf4j.simpleLogger.defaultLogLevel` JVM
 property explicitly when verbose local diagnostics are required.
+
+`delete-if-present` is the fail-closed idempotent delete used by guarded
+migration/rollback automation. It opens the same authenticated forced-T=0
+Security Domain path and accepts only GP status `6A88` as already absent. A
+`6A86`, transport error, authentication failure, or any other `GPException`
+remains a non-zero process failure. The legacy `delete` command retains its
+historical best-effort output contract for compatibility.
 
 ## Development validation
 

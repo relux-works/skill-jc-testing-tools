@@ -25,6 +25,8 @@ import java.util.EnumSet;
  *                                            -- open secure channel, LOAD cap, INSTALL applet
  *   secure-apdu <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex> <apduHex>...
  *                                            -- open secure channel, send authenticated APDUs
+ *   delete-if-present <aidHex> <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex>
+ *                                            -- authenticated delete; only 6A88 is already absent
  *   apdu <cla> <ins> <p1> <p2> [dataHex]     -- raw APDU after plain SELECT (no secure channel)
  */
 public class GpT0 {
@@ -97,6 +99,9 @@ public class GpT0 {
                 case "delete":
                     doDelete(apduBibo, args);
                     break;
+                case "delete-if-present":
+                    doDeleteIfPresent(apduBibo, args);
+                    break;
                 default:
                     System.err.println("unknown mode: " + args[0]);
                     System.exit(2);
@@ -111,6 +116,7 @@ public class GpT0 {
                 + " | install <cap> <pkgAid> <appletAid> <instanceAid> <kic> <kid> <kik> [keyVersionHex scpName iHex]"
                 + " | secure-apdu <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex> <apduHex>..."
                 + " | delete <aidHex> <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex>"
+                + " | delete-if-present <aidHex> <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex>"
                 + " | apdu <cla> <ins> <p1> <p2> [dataHex]");
     }
 
@@ -305,6 +311,43 @@ public class GpT0 {
         } catch (GPException e) {
             System.out.println("Delete failed (may simply not exist yet): " + e.getMessage());
         }
+    }
+
+    /**
+     * Open a secure channel and delete an AID, accepting only the precise GP
+     * reference-not-found status as an idempotent already-absent result.
+     * Every other GPException propagates so the process exits non-zero.
+     */
+    private static void doDeleteIfPresent(APDUBIBO bibo, String[] args) throws Exception {
+        if (args.length < 8) {
+            System.err.println("delete-if-present <aidHex> <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex>");
+            System.exit(2);
+        }
+        AID aid = AID.fromString(args[1]);
+        byte[] kic = hex(args[2]);
+        byte[] kid = hex(args[3]);
+        byte[] kik = hex(args[4]);
+        int keyVersion = Integer.parseInt(args[5], 16);
+        String scpName = args[6];
+        int scpI = Integer.parseInt(args[7], 16);
+
+        GPSession session = GPSession.discover(bibo);
+        PlaintextKeys keys = PlaintextKeys.fromKeys(kic, kid, kik);
+        keys.setVersion(keyVersion);
+        session.openSecureChannel(keys, new GPSecureChannelVersion(GPSecureChannelVersion.SCP.valueOf(scpName), scpI), null, GPSession.defaultMode);
+        try {
+            session.deleteAID(aid, true);
+            System.out.println("Deleted " + aid);
+        } catch (GPException e) {
+            if (!isDeleteAlreadyAbsent(e)) {
+                throw e;
+            }
+            System.out.println("Already absent " + aid + " (SW=6A88)");
+        }
+    }
+
+    static boolean isDeleteAlreadyAbsent(GPException failure) {
+        return failure.sw == 0x6A88;
     }
 
     private static void doApdu(APDUBIBO bibo, String[] args) throws Exception {
