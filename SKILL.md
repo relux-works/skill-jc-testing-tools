@@ -58,6 +58,16 @@ applet source
 
 Each stage is a real, separate verification step -- a CAP that builds does not mean it converts for real hardware; a CAP that installs does not mean the applet's runtime logic is bug-free; jCardSim passing does not mean the real JC converter will accept the same code. See [references/methodology.md](references/methodology.md) for exactly which failure modes appear at which stage and how to tell them apart.
 
+The client side has its own cheap-to-expensive progression: the same generated
+jcrpc client runs against three targets by swapping its `APDUTransport` --
+**simulator** (`TCPTransport` -> bridge -> jCardSim), **reader**
+([`OmnikeyTransport`](https://github.com/relux-works/jc-omnikey-transport) ->
+real card in a PC/SC reader, host JVM, no phone), then **device**
+(`OmapiTransport` -> card in a phone slot, the only lane that exercises OMAPI
+access control). The reader lane is the one that lets you hit real converter /
+Security Domain framing / card quirks right after applet development, before the
+human-gated phone lane. See [references/transport-lanes.md](references/transport-lanes.md).
+
 ---
 
 ## Use the javacard-rpc family for applet contracts
@@ -67,6 +77,7 @@ Don't hand-roll CLA/INS dispatch and hand-write client-side APDU construction. `
 - **`javacard-rpc`** -- the IDL + Go codegen (`jcrpc-gen`). One `.toml` file defines the applet's methods (INS codes, request/response fields); codegen produces a Java server skeleton and typed Kotlin/Swift clients from it.
 - **`javacard-rpc-server-javacard`** -- `AppletBase`, the server-side runtime the generated skeleton builds on.
 - **`javacard-rpc-client-kotlin`** -- `APDUCommand`/`APDUResponse`/`APDUTransport`/`TCPTransport`, the Kotlin/JVM client runtime. `TCPTransport` is plain `java.net.Socket` -- it runs unmodified on Android, no separate "Android transport" needed.
+- **`jc-omnikey-transport`** -- an `APDUTransport` backed by a physical PC/SC reader (`javax.smartcardio`, T=0 forced). Swap it under the generated client to run the real client against a real card in a reader from a host JVM -- no bridge, no phone. This is the "reader" lane; see [references/transport-lanes.md](references/transport-lanes.md).
 - **`javacard-rpc-client-swift`** -- the same shape on Swift/iOS.
 
 ### Worked example
@@ -125,6 +136,11 @@ java --add-modules java.smartcardio -cp "build:gp.jar" GpT0 trysc <kic> <kid> <k
 java --add-modules java.smartcardio -cp "build:gp.jar" GpT0 install <cap> <pkgAid> <appletAid> <instanceAid> <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex>
 
 java --add-modules java.smartcardio -cp "build:gp.jar" GpT0 delete <aidHex> <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex>
+
+# Guarded migration/rollback automation: authenticated and idempotent, but
+# only the precise GP not-found status 6A88 is accepted as already absent.
+# Every other delete/authentication/transport failure exits non-zero.
+java --add-modules java.smartcardio -cp "build:gp.jar" GpT0 delete-if-present <aidHex> <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex>
 ```
 
 **Finding the right key/SCP/version/i combination without risking the card:** [references/safe-gp-key-discovery.md](references/safe-gp-key-discovery.md) documents the exact safe probing method (`trysc`) -- every combination attempt is provably risk-free until the correct one is found, because the local cryptogram check fails before `EXTERNAL AUTHENTICATE` is ever sent for a wrong guess.
@@ -169,6 +185,7 @@ not part of the PC/SC-only `jc-harness` Go binary.
 |---|---|
 | [references/worked-example-bsim-javacard-helloworld.md](references/worked-example-bsim-javacard-helloworld.md) | Full physically-verified walkthrough: simulator -> CAP -> install -> typed client, with the exact commands |
 | [references/methodology.md](references/methodology.md) | What each dev-cycle stage actually verifies, and what it doesn't |
+| [references/transport-lanes.md](references/transport-lanes.md) | The three client transport lanes (simulator / reader / device), which bug class each catches, and the swap |
 | [references/t0-vs-t1.md](references/t0-vs-t1.md) | Why T=0 must be forced explicitly, and what breaks if it isn't |
 | [references/safe-gp-key-discovery.md](references/safe-gp-key-discovery.md) | Non-destructive method for finding the correct GP key/SCP/version/i combination |
 | [references/gp-t0-driver-pattern.md](references/gp-t0-driver-pattern.md) | Why GlobalPlatformPro's CLI can't be used directly, and the library-mode workaround |
