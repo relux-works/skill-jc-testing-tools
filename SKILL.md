@@ -187,6 +187,7 @@ not part of the PC/SC-only `jc-harness` Go binary.
 | [references/methodology.md](references/methodology.md) | What each dev-cycle stage actually verifies, and what it doesn't |
 | [references/transport-lanes.md](references/transport-lanes.md) | The three client transport lanes (simulator / reader / device), which bug class each catches, and the swap |
 | [references/applet-file-access-access-domain.md](references/applet-file-access-access-domain.md) | How an applet reads the card's own files (FileView / Path A): the Access Domain grant, keys vs grant, who installs it, and why it usually falls back to host-read provisioning |
+| [references/ios-sim-applet-bip-messaging.md](references/ios-sim-applet-bip-messaging.md) | iOS has no APDU path to the SIM (no OMAPI/entitlement); the backend-hub + BIP async bidirectional messaging pattern that reaches the applet below the OS, its privilege model, and what our keys cover vs what to request |
 | [references/t0-vs-t1.md](references/t0-vs-t1.md) | Why T=0 must be forced explicitly, and what breaks if it isn't |
 | [references/safe-gp-key-discovery.md](references/safe-gp-key-discovery.md) | Non-destructive method for finding the correct GP key/SCP/version/i combination |
 | [references/gp-t0-driver-pattern.md](references/gp-t0-driver-pattern.md) | Why GlobalPlatformPro's CLI can't be used directly, and the library-mode workaround |
