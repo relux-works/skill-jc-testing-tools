@@ -59,6 +59,8 @@ func main() {
 		result, err = cmdSmoke(os.Args[2:])
 	case "seq":
 		result, err = cmdSeq(os.Args[2:])
+	case "sim-meta":
+		result, err = cmdSIMMeta(os.Args[2:])
 	case "help", "-h", "--help":
 		usage()
 		return
@@ -124,6 +126,12 @@ Usage:
       session left behind -- needed to reach the GSM file system after a
       prior AID SELECT).
       -> {"reader": ..., "results": [{...}, ...]}
+
+  jc-harness sim-meta --reader NAME
+      Warm-reset, then read/decode classic GSM EF_ICCID and EF_IMSI in one
+      T=0 session. Subscriber identifiers are returned as data: consume them
+      directly and do not redirect the JSON to shared logs.
+      -> {"reader": ..., "protocol": "T=0", "iccid": "...", "imsi": "..."}
 
 --reader takes a case-insensitive substring match against "jc-harness readers"
 output (e.g. "OMNIKEY"), not necessarily the exact full name.
@@ -332,6 +340,225 @@ func cmdSeq(args []string) (any, error) {
 		return nil, err
 	}
 	return seqResult{Reader: sess.ReaderName, Results: results}, nil
+}
+
+// simMetaResult intentionally exposes the identifiers as command data: the
+// point of sim-meta is to let an authorized local workflow reconcile card
+// metadata without open-coding GSM BCD parsing. Callers must treat the JSON as
+// subscriber data and avoid redirecting it to shared logs or task evidence.
+type simMetaResult struct {
+	Reader   string `json:"reader"`
+	Protocol string `json:"protocol"`
+	ICCID    string `json:"iccid"`
+	IMSI     string `json:"imsi"`
+}
+
+// cmdSIMMeta reads the classic GSM SIM file tree in the one selection context
+// it requires. Reset is mandatory here: a card can retain an AID selection
+// across a prior PC/SC LeaveCard disconnect, making classic CLA=A0 commands
+// otherwise fail or target the wrong application context.
+func cmdSIMMeta(args []string) (any, error) {
+	reader, err := requireFlag(args, "--reader", "sim-meta")
+	if err != nil {
+		return nil, err
+	}
+
+	sess, err := pcsc.Connect(reader)
+	if err != nil {
+		return nil, err
+	}
+	defer sess.Close()
+
+	if err := sess.Reset(); err != nil {
+		return nil, err
+	}
+	meta, err := readSIMMetadata(sess)
+	if err != nil {
+		return nil, err
+	}
+	return simMetaResult{
+		Reader:   sess.ReaderName,
+		Protocol: "T=0",
+		ICCID:    meta.ICCID,
+		IMSI:     meta.IMSI,
+	}, nil
+}
+
+// apduTransmitter keeps the SIM filesystem workflow independently testable:
+// real runs use *pcsc.Session, while unit tests assert every APDU and every
+// status transition with a scripted transmitter.
+type apduTransmitter interface {
+	Transmit([]byte) ([]byte, error)
+}
+
+type simMetadata struct {
+	ICCID string
+	IMSI  string
+}
+
+var (
+	simSelectMF      = []byte{0xA0, 0xA4, 0x00, 0x00, 0x02, 0x3F, 0x00}
+	simSelectEFICCID = []byte{0xA0, 0xA4, 0x00, 0x00, 0x02, 0x2F, 0xE2}
+	simReadEFICCID   = []byte{0xA0, 0xB0, 0x00, 0x00, 0x0A}
+	simSelectDFGSM   = []byte{0xA0, 0xA4, 0x00, 0x00, 0x02, 0x7F, 0x20}
+	simSelectEFIMSI  = []byte{0xA0, 0xA4, 0x00, 0x00, 0x02, 0x6F, 0x07}
+	simReadEFIMSI    = []byte{0xA0, 0xB0, 0x00, 0x00, 0x09}
+)
+
+// readSIMMetadata owns the exact classic-GSM file-selection sequence. This is
+// intentionally not built on repeated cmdAPDU calls: each reconnect loses the
+// selected file context, and accidentally applying ICCID's BCD rules to IMSI
+// was the failure mode this command is designed to eliminate.
+func readSIMMetadata(tx apduTransmitter) (simMetadata, error) {
+	if _, err := requireSIMSelect(tx, "select MF for EF_ICCID", simSelectMF); err != nil {
+		return simMetadata{}, err
+	}
+	if _, err := requireSIMSelect(tx, "select EF_ICCID", simSelectEFICCID); err != nil {
+		return simMetadata{}, err
+	}
+	iccidResponse, err := requireSIMRead(tx, "read EF_ICCID", simReadEFICCID)
+	if err != nil {
+		return simMetadata{}, err
+	}
+	iccidRaw, err := hex.DecodeString(iccidResponse.Data)
+	if err != nil {
+		return simMetadata{}, fmt.Errorf("decode EF_ICCID response bytes: %w", err)
+	}
+	iccid, err := decodeICCID(iccidRaw)
+	if err != nil {
+		return simMetadata{}, fmt.Errorf("decode EF_ICCID: %w", err)
+	}
+
+	if _, err := requireSIMSelect(tx, "select MF for EF_IMSI", simSelectMF); err != nil {
+		return simMetadata{}, err
+	}
+	if _, err := requireSIMSelect(tx, "select DF_GSM", simSelectDFGSM); err != nil {
+		return simMetadata{}, err
+	}
+	if _, err := requireSIMSelect(tx, "select EF_IMSI", simSelectEFIMSI); err != nil {
+		return simMetadata{}, err
+	}
+	imsiResponse, err := requireSIMRead(tx, "read EF_IMSI", simReadEFIMSI)
+	if err != nil {
+		return simMetadata{}, err
+	}
+	imsiRaw, err := hex.DecodeString(imsiResponse.Data)
+	if err != nil {
+		return simMetadata{}, fmt.Errorf("decode EF_IMSI response bytes: %w", err)
+	}
+	imsi, err := decodeGSMIMSI(imsiRaw)
+	if err != nil {
+		return simMetadata{}, fmt.Errorf("decode EF_IMSI: %w", err)
+	}
+
+	return simMetadata{ICCID: iccid, IMSI: imsi}, nil
+}
+
+func requireSIMSelect(tx apduTransmitter, operation string, capdu []byte) (apduResult, error) {
+	response, err := transmitSIMAPDU(tx, operation, capdu)
+	if err != nil {
+		return apduResult{}, err
+	}
+	// Classic SIM SELECT reports 9Fxx when response bytes are available. The
+	// FCP is not needed to read these fixed-size elementary files, so 9Fxx is
+	// success here just as 9000 is.
+	if response.SW != "9000" && !(len(response.SW) == 4 && strings.HasPrefix(response.SW, "9f")) {
+		return apduResult{}, fmt.Errorf("%s: unexpected status %s", operation, response.SW)
+	}
+	return response, nil
+}
+
+func requireSIMRead(tx apduTransmitter, operation string, capdu []byte) (apduResult, error) {
+	response, err := transmitSIMAPDU(tx, operation, capdu)
+	if err != nil {
+		return apduResult{}, err
+	}
+	if response.SW != "9000" {
+		return apduResult{}, fmt.Errorf("%s: unexpected status %s", operation, response.SW)
+	}
+	return response, nil
+}
+
+func transmitSIMAPDU(tx apduTransmitter, operation string, capdu []byte) (apduResult, error) {
+	resp, err := tx.Transmit(capdu)
+	if err != nil {
+		return apduResult{}, fmt.Errorf("%s: %w", operation, err)
+	}
+	parsed, err := toAPDUResult(resp)
+	if err != nil {
+		return apduResult{}, fmt.Errorf("%s: %w", operation, err)
+	}
+	return parsed, nil
+}
+
+// decodeGSMIMSI decodes the EF_IMSI layout from GSM 11.11 / 3GPP TS 51.011:
+// byte 0 declares the number of following bytes; byte 1's low nibble is the
+// type/parity indicator, not IMSI digit 1; remaining BCD digits are packed
+// low nibble first. A filler nibble is accepted only as the final digit slot.
+func decodeGSMIMSI(raw []byte) (string, error) {
+	if len(raw) < 2 {
+		return "", fmt.Errorf("response has no IMSI payload")
+	}
+	declaredLength := int(raw[0])
+	if declaredLength == 0 {
+		return "", fmt.Errorf("declared IMSI length is zero")
+	}
+	if len(raw) != declaredLength+1 {
+		return "", fmt.Errorf("declared IMSI length is %d bytes, response has %d payload bytes", declaredLength, len(raw)-1)
+	}
+
+	nibbles := make([]byte, 0, declaredLength*2)
+	for _, b := range raw[1:] {
+		nibbles = append(nibbles, b&0x0F, b>>4)
+	}
+	if len(nibbles) < 2 {
+		return "", fmt.Errorf("IMSI payload has no digit nibbles")
+	}
+
+	digits := nibbles[1:] // Drop the low-nibble type/parity indicator.
+	var out strings.Builder
+	for i, nibble := range digits {
+		if nibble == 0x0F && i == len(digits)-1 {
+			continue
+		}
+		if nibble > 9 {
+			return "", fmt.Errorf("invalid IMSI BCD nibble at digit %d", i+1)
+		}
+		out.WriteByte('0' + nibble)
+	}
+	if out.Len() == 0 {
+		return "", fmt.Errorf("IMSI has no digits")
+	}
+	if out.Len() > 15 {
+		return "", fmt.Errorf("IMSI has %d digits; maximum is 15", out.Len())
+	}
+	return out.String(), nil
+}
+
+// decodeICCID decodes EF_ICCID's plain swapped-BCD value. Unlike EF_IMSI,
+// there is no length byte and no type/parity nibble. A filler nibble is valid
+// only in the final high-nibble position.
+func decodeICCID(raw []byte) (string, error) {
+	if len(raw) == 0 {
+		return "", fmt.Errorf("response has no ICCID payload")
+	}
+	var out strings.Builder
+	for byteIndex, b := range raw {
+		for nibbleIndex, nibble := range []byte{b & 0x0F, b >> 4} {
+			lastPosition := byteIndex == len(raw)-1 && nibbleIndex == 1
+			if nibble == 0x0F && lastPosition {
+				continue
+			}
+			if nibble > 9 {
+				return "", fmt.Errorf("invalid ICCID BCD nibble at digit %d", byteIndex*2+nibbleIndex+1)
+			}
+			out.WriteByte('0' + nibble)
+		}
+	}
+	if out.Len() == 0 {
+		return "", fmt.Errorf("ICCID has no digits")
+	}
+	return out.String(), nil
 }
 
 // parseAPDUSequence splits a comma-separated --apdu argument into decoded

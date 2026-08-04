@@ -106,16 +106,77 @@ jc-harness atr --reader OMNIKEY
 jc-harness smoke --reader OMNIKEY --aid F0000000AA01 --apdu B0010000...,B0020000
 # {"reader": "...", "select": {"sw": "9000", "data": ""}, "results": [{"sw": "9000", "data": "..."}, ...]}
 
+# Read the two standard classic-GSM identity EFs. The command warm-resets the
+# card, uses one T=0 session, validates the file-operation status words, and
+# applies the distinct ICCID/IMSI BCD rules (including EF_IMSI's length and
+# type/parity nibble). The output contains subscriber identifiers: consume it
+# in memory and never redirect it to shared logs or task evidence.
+jc-harness sim-meta --reader OMNIKEY
+# {"reader": "...", "protocol": "T=0", "iccid": "...", "imsi": "..."}
+
 # seq: send a raw APDU sequence over ONE session with no implicit SELECT --
 # the generic stateful primitive smoke specializes. Selection/file-system
 # state persists across APDUs, so this is what you use to read a card's
-# classic-GSM file system (CLA=0xA0 SELECT MF -> DF_GSM -> EF_IMSI -> READ
-# BINARY) or any raw-read-then-reselect-AID provisioning flow that a leading
-# AID SELECT would break. (`apdu` can't be chained for this -- it reconnects
-# per call and loses selection state.)
+# non-standard classic-GSM file system or any raw-read-then-reselect-AID
+# provisioning flow that a leading AID SELECT would break. Use `sim-meta`, not
+# hand-written APDUs, for EF_ICCID / EF_IMSI. (`apdu` can't be chained for this
+# -- it reconnects per call and loses selection state.)
 jc-harness seq --reader OMNIKEY --apdu A0A4000002 3F00,A0A4000002 7F20,A0A4000002 6F07,A0B0000009
 # {"reader": "...", "results": [{"sw": "9f0f", "data": ""}, ..., {"sw": "9000", "data": "08..."}]}
 ```
+
+### Read `EF_MSISDN` safely (classic SIM)
+
+`EF_MSISDN` is a record-based, optional on-card copy of a telephone number. It
+is not the operator's source of truth: it can be absent, blank, stale, or have
+multiple records. Keep the whole exchange in one `seq` session and identify the
+card first (for example by `EF_ICCID`) before associating a result with metadata.
+
+```bash
+# MF -> DF_TELECOM -> EF_MSISDN -> READ RECORD 1, absolute mode.
+# The test UICC required a 28-byte record, so Le is 0x1C here.
+jc-harness seq --reader OMNIKEY --reset --apdu \
+  A0A40000023F00,A0A40000027F10,A0A40000026F40,A0B201041C
+```
+
+`9Fxx` from either `SELECT` is a successful selection with response bytes
+available. Do not assume `0x1C` for another card: obtain the record length from
+the FCP or card documentation. On the verified test UICC, `READ RECORD ...
+Le=00` returned `671C` and a retry with `Le=1C` succeeded; that is an empirical
+card-specific observation, not a general `67xx` decoding rule.
+
+The returned record has the ADN layout: alpha identifier, BCD-number length,
+TON/NPI, BCD digits, capability/configuration bytes, and an extension-record
+reference. Decode only the declared BCD-number length; if the extension
+reference is present, read the appropriate extension record before treating the
+number as complete. An all-`FF` record, or an empty number-length field, means
+that `EF_MSISDN` is selected but not provisioned.
+
+MSISDN is subscriber data. Do not print raw command JSON, redirect it to logs,
+or put the number in docs/task evidence. Decode and compare it in memory, then
+report only a redacted result. A PC/SC reader-side read also does **not** grant
+an installed applet access: the applet still needs the applicable UICC file-view
+and access-domain permission for `EF_MSISDN`.
+
+### USSD is terminal/network work, not reader APDU
+
+A PC/SC reader has an APDU transport to the UICC, but no cellular modem, radio
+registration, or network signalling stack. It therefore cannot originate an
+operator USSD session or receive the network response merely by sending an APDU
+to the card.
+
+An STK/USAT applet can issue the proactive `SEND USSD` command, but the Mobile
+Equipment (ME) executes that command against the network and returns the result
+in its Terminal Response. The reader lane cannot substitute for that ME: even a
+host that emulates parts of the STK terminal protocol has no mobile-network
+attachment. Use this flow only with the SIM in a registered handset or cellular
+modem that supports the required STK terminal profile.
+
+For host-driven carrier USSD automation, put the SIM in a registered modem or
+phone and use that device's telephony/modem interface; parse the result there.
+Use `jc-harness` only for the reader-side APDU, filesystem, and applet-debugging
+work. Treat carrier USSD as an external action: do not send a code while merely
+probing a card, and do not log a returned subscriber number.
 
 Every command prints one JSON object/array to stdout, success or `{"error": "..."}` on failure -- no flag has a default, missing a required flag is a hard, specific error. See `tools/jc-harness/main.go`'s package doc for the full design rationale (including why this does *not* adopt the full `agent-facing-api` query-DSL pattern -- there's no multi-entity dataset here to project/filter against, just a handful of imperative hardware actions).
 

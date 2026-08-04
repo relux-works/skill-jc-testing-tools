@@ -18,12 +18,29 @@ Builds both tools, installs `jc-harness`/`gp-t0-helper` to `~/.local/bin`, and i
 jc-harness readers
 jc-harness atr --reader OMNIKEY
 jc-harness smoke --reader OMNIKEY --aid <hex> --apdu <hex>[,<hex>...]
+jc-harness sim-meta --reader OMNIKEY
+# Read-only optional telephone-number record; use the card's actual record length.
+jc-harness seq --reader OMNIKEY --reset --apdu A0A40000023F00,A0A40000027F10,A0A40000026F40,A0B201041C
 
 gp-t0-helper trysc <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex>
 gp-t0-helper install <cap> <pkgAid> <appletAid> <instanceAid> <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex>
 gp-t0-helper secure-apdu <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex> <apduHex> [<apduHex>...]
 gp-t0-helper delete-if-present <aidHex> <kic> <kid> <kik> <keyVersionHex> <scpName> <iHex>
 ```
+
+The `EF_MSISDN` example reads only one record and uses `0x1C` solely because
+that is the verified test-card record length. See [SKILL.md](SKILL.md) for FCP
+length discovery, ADN-record decoding, redaction, and the distinction between a
+reader-side read and applet file access.
+
+`sim-meta` is the read-only canonical path for `EF_ICCID` and `EF_IMSI`: it
+resets the card, keeps file selections in one T=0 session, and applies the two
+different BCD layouts. Its JSON contains subscriber identifiers, so consume it
+in memory and never redirect the output to shared logs.
+
+`jc-harness` does not originate carrier USSD sessions: a PC/SC reader has no
+cellular modem or network attachment. Use a registered handset or modem for
+USSD, and see [SKILL.md](SKILL.md) for the STK `SEND USSD` boundary.
 
 `secure-apdu` sends the supplied commands in order through GlobalPlatformPro's
 authenticated secure-messaging wrapper while retaining the helper's forced
