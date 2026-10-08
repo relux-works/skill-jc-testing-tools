@@ -115,17 +115,50 @@ Diagnose and recover in this order:
    `tools.jar` SHA-256 is
    `179b4eda4cea2d058b2c239f0d5e2b98940faced7f6b4e8287af7718df3184dd`.
    This is one recorded 3.1 build, not evidence about every newer converter;
-   helper refactoring is not yet validated.
-2. If the probe demonstrably succeeds and remains target-compatible, pin the
+   it did not recover packaging.
+2. Measure the aggregate exception-handler layout before selecting a source
+   structure. `ReferenceLocationComponent.f_byte2Offset` is package-wide
+   static state, initialized once for the component rather than reset per
+   method or class. In one retained failed route-B witness, 20 short execution
+   helpers still put 53 catch-all entries before the first typed native-factory
+   handler; that handler reached offset `431`, which exceeded the converter's
+   `255` single-entry bound. The `431`/`53` observation describes that exact
+   layout, not a universal handler-count limit. A short method by itself is
+   therefore not a guaranteed recovery.
+3. If the probe demonstrably succeeds and remains target-compatible, pin the
    exact converter distribution, record its SHA-256 digest, make the build
    reproducible, and rebuild every consumer CAP in the coordinated release.
-3. If that route fails or emits an incompatible CAP, shorten the encoded
-   handler distances by moving the protected region into a small helper. Keep
-   the original busy-state, wipe, and release guarantees on every exit, then
-   rerun the original positive controls, named negative tests, and narrowing
-   mutants that prove those guarantees were not weakened.
+4. If the ownership contract authorizes caller-owned cleanup, a structural
+   alternative is explicit library `acquire` and wiping `release`, with each
+   scratch primitive first verifying the current owner/operation marker and
+   refusing busy (`0x698E`) before writing any live window, operand, or output.
+   Protect each actual APDU-command and SIO entrypoint (including Facade/Auth
+   consumers) with exactly one `try`/`finally` that performs the release.
+   Cleanup moves to that boundary; it is not removed. Nested acquire must
+   refuse any held marker, including the same operation. Do not retain a
+   caller APDU array in global state; pass the current window to the wiping
+   release when necessary.
+5. Prove the selected structure against its real aggregate handler counts and
+   reference gaps with the pinned Java Card 3.0.5u4 / ant-javacard 26.02.22 /
+   OpenJDK 11 CAP gate. Preserve success, busy-refusal, native-exception,
+   interruption/reset/retry, and genuine nested-SIO cleanup behavior; verify
+   unchanged outer spans, persistent-output refusal, and complete transient
+   GCM-output wiping. Keep the existing positive and negative controls and add
+   narrowing `missing-primitive-owner-check` and
+   `missing-entrypoint-release` mutants. If the aggregate bound still fails,
+   stop and report the actual counts and offsets instead of weakening the
+   ownership or cleanup contract.
 
-Do not binary-patch `tools.jar`, waive CAP generation, remove `finally`, or
-shuffle methods arbitrarily to make the offset disappear. A passing CAP probe
-still requires the normal installation and physical-hardware qualification;
-neither is implied by this diagnostic.
+One caller-owned diagnostic layout has produced a CAP on that unchanged pinned
+toolchain: Oracle verification passed for 10 components, four artifacts, and
+two class files at major version 50. This was one conversion using the existing
+`1.1.3` artifact name. It is evidence that this particular packaging layout
+recovered, not a universal cure, final `1.2.0` release identity, a
+reproducibility result, completed behavioral or mutant acceptance, or physical
+qualification.
+
+Do not binary-patch `tools.jar`, waive CAP generation, add fake typed catches,
+shuffle class or method order, introduce union flags, remove cleanup, or weaken
+ownership to make the offset disappear. A passing CAP probe still requires the
+normal source acceptance, reproducibility, installation, and physical-hardware
+qualification; none is implied by this diagnostic.

@@ -254,7 +254,7 @@ not part of the PC/SC-only `jc-harness` Go binary.
 | [references/safe-gp-key-discovery.md](references/safe-gp-key-discovery.md) | Non-destructive method for finding the correct GP key/SCP/version/i combination |
 | [references/gp-t0-driver-pattern.md](references/gp-t0-driver-pattern.md) | Why GlobalPlatformPro's CLI can't be used directly, and the library-mode workaround |
 | [references/codegen-jc-classic-compatibility.md](references/codegen-jc-classic-compatibility.md) | Exact rules generated/hand-written applet code must follow to convert on real Java Card Classic |
-| [references/cap-build-toolchain.md](references/cap-build-toolchain.md) | `ant-javacard` setup, JDK-version-per-kit gotchas, `ints="true"`, and Oracle 3.0.5u4 exception-handler offset overflow diagnosis/recovery |
+| [references/cap-build-toolchain.md](references/cap-build-toolchain.md) | `ant-javacard` setup, JDK-version-per-kit gotchas, `ints="true"`, and Oracle 3.0.5u4 package-wide exception-handler accounting plus conditional caller-entrypoint cleanup recovery |
 | [references/android-omapi-readiness.md](references/android-omapi-readiness.md) | Android OMAPI readiness: feature flags, SIM-slot exposure reality, and the wrong-slot + on-card-access-control barriers (with `android-omapi-probe.sh`) |
 
 ---
