@@ -1,5 +1,5 @@
 // Package pcsc wraps github.com/ebfe/scard with the two hard-won lessons from
-// the bsim-javacard-helloworld / bsim-pcsc-bridge-go dev cycle:
+// the example-applet / example-applet-pcsc-bridge-go dev cycle:
 //
 //  1. Force protocol T=0 explicitly on connect. Letting the OS negotiate
 //     ("any" protocol) reliably picks T=1 on readers/cards that formally
@@ -119,7 +119,7 @@ func (s *Session) resolveT0Chaining(lastCmd, resp []byte) ([]byte, error) {
 // Select sends a plain SELECT-by-AID APDU (classic dialect, CLA=0x00) with no
 // explicit Le -- an explicit Le on some commands has been observed to
 // reproducibly break the PC/SC transaction on some reader/card/applet
-// combinations (see bsim-javacard-helloworld's harness notes); omitting it
+// combinations (see example-applet's harness notes); omitting it
 // and letting the applet's own setOutgoingAndSend() determine the response
 // length is the safe default this harness always uses.
 func (s *Session) Select(aid []byte) ([]byte, error) {

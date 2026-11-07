@@ -1,5 +1,5 @@
 // jc-harness is a CLI harness for the physical JavaCard/UICC dev cycle,
-// distilled from the bsim-javacard-helloworld / bsim-pcsc-bridge-go session.
+// distilled from the example-applet / example-applet-pcsc-bridge-go session.
 //
 // Reader/ATR/raw-APDU/smoke commands are native Go (github.com/ebfe/scard,
 // T=0-forced). GlobalPlatform commands (secure-channel install/delete/key

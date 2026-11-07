@@ -4,7 +4,7 @@
 # reach a UICC applet over OMAPI (android.se.omapi), and if not, which known
 # barrier you are hitting.
 #
-# Distilled from a real bsim phys-sim-dev-cycle session (2026-07-15) validating
+# Distilled from a real example-applet phys-sim-dev-cycle session (2026-07-15) validating
 # a demo app's realDevice flavor against a Xiaomi M2101K6G, which surfaced two
 # sequential OMAPI barriers:
 #   1. card in the wrong physical SIM slot -> getReaders() only exposes SIM1 on

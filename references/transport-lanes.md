@@ -21,7 +21,7 @@ rejects things jCardSim tolerates (String exceptions, `int` array indexing,
 `System.arraycopy`), and the real Security Domain frames STORE DATA differently
 than a full-APDU simulator does. (Both classes of bug were caught only on
 hardware — see [codegen-jc-classic-compatibility.md](codegen-jc-classic-compatibility.md)
-and the bsim `processData` framing bug.)
+and the example-applet `processData` framing bug.)
 
 The reader lane closes that gap **without a phone**: point the real client at
 the real card in a reader, from a host JVM, right after applet development. You

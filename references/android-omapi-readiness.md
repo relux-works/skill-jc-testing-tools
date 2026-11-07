@@ -6,7 +6,7 @@ reader. This stage has device- and card-dependent failure modes that are non-obv
 and cost real time to diagnose. This doc is the checklist; `scripts/android-omapi-probe.sh`
 automates the diagnosis.
 
-Distilled from a real bsim `phys-sim-dev-cycle` session (2026-07-15) validating a
+Distilled from a real example-applet `phys-sim-dev-cycle` session (2026-07-15) validating a
 demo app's `realDevice` flavor against a **Xiaomi M2101K6G (Redmi Note 10 Pro,
 MIUI, Android 13 / API 33)** with a programmable test UICC.
 

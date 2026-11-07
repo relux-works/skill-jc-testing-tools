@@ -6,8 +6,8 @@ description: >
   (gp-t0-helper) for GlobalPlatform install/delete/secure-channel key
   discovery, and the javacard-rpc family (IDL codegen + Kotlin/Swift/Java
   runtimes) as the recommended applet-contract pattern. Distilled from a real
-  simulator-to-physical-hardware dev cycle (bsim-javacard-helloworld,
-  bsim-pcsc-bridge-go).
+  simulator-to-physical-hardware dev cycle (example-applet,
+  example-applet-pcsc-bridge-go).
 triggers:
   - javacard
   - java card
@@ -33,7 +33,7 @@ triggers:
 
 Toolkit and methodology for the physical Java Card/UICC dev cycle: write an applet, verify it in a simulator, build a real CAP, install it on physical hardware via GlobalPlatform, and talk to it over APDU -- reproducibly, without rediscovering the same PC/SC and GlobalPlatform gotchas every time.
 
-Everything here was distilled from a real end-to-end session (see [references/worked-example-bsim-javacard-helloworld.md](references/worked-example-bsim-javacard-helloworld.md)) that went from "nothing talks to the reader" through a full loop, including several genuinely nasty, non-obvious bugs. This skill exists so the next project doesn't have to hit them again.
+Everything here was distilled from a real end-to-end session (see [references/worked-example-applet.md](references/worked-example-applet.md)) that went from "nothing talks to the reader" through a full loop, including several genuinely nasty, non-obvious bugs. This skill exists so the next project doesn't have to hit them again.
 
 ---
 
@@ -82,7 +82,7 @@ Don't hand-roll CLA/INS dispatch and hand-write client-side APDU construction. `
 
 ### Worked example
 
-`bsim-javacard-helloworld` (see the full writeup in [references/worked-example-bsim-javacard-helloworld.md](references/worked-example-bsim-javacard-helloworld.md)) is a complete, physically-verified example of this pattern:
+`example-applet` (see the full writeup in [references/worked-example-applet.md](references/worked-example-applet.md)) is a complete, physically-verified example of this pattern:
 
 - `idl/helloworld.toml` -- the IDL contract (`echo`, `getVersion`)
 - `HelloApplet.java` / `HelloJCApplet.java` -- generated skeleton subclass + the thin `javacard.framework.Applet` DI wrapper (this two-class split -- business logic extends the generated skeleton, a separate tiny class is the actual installable `Applet` -- is the standard shape; copy it, don't reinvent it)
@@ -244,7 +244,7 @@ not part of the PC/SC-only `jc-harness` Go binary.
 
 | File | Covers |
 |---|---|
-| [references/worked-example-bsim-javacard-helloworld.md](references/worked-example-bsim-javacard-helloworld.md) | Full physically-verified walkthrough: simulator -> CAP -> install -> typed client, with the exact commands |
+| [references/worked-example-applet.md](references/worked-example-applet.md) | Full physically-verified walkthrough: simulator -> CAP -> install -> typed client, with the exact commands |
 | [references/methodology.md](references/methodology.md) | What each dev-cycle stage actually verifies, and what it doesn't |
 | [references/transport-lanes.md](references/transport-lanes.md) | The three client transport lanes (simulator / reader / device), which bug class each catches, and the swap |
 | [references/cos-export-applet-what-lives-where.md](references/cos-export-applet-what-lives-where.md) | What lives where — the COS library (in firmware) vs export files (build machine only) vs your applet (you load it); the two linkings; and the SDK-vs-entitlement mapping. Read this first |

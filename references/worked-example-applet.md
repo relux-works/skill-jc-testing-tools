@@ -1,6 +1,6 @@
-# Worked example: bsim-javacard-helloworld
+# Worked example: example-applet
 
-A complete, physically-verified run of the full dev cycle this skill is distilled from. Project: `bsim-javacard-helloworld` (part of the `bsim` project's `phys-sim-dev-cycle` epic). Hardware: OMNIKEY 3121 reader, a GlobalPlatform-capable test UICC (JavaCard 3.0.4 runtime).
+A complete, physically-verified run of the full dev cycle this skill is distilled from. Project: `example-applet`, using the `phys-sim-dev-cycle` workflow. Hardware: OMNIKEY 3121 reader, a GlobalPlatform-capable test UICC (JavaCard 3.0.4 runtime).
 
 ## The IDL
 
@@ -28,7 +28,7 @@ fields = [{ name = "major", type = "u8" }, { name = "minor", type = "u8" }]
 Generate the Java skeleton + Kotlin client:
 
 ```bash
-jcrpc-gen --java com.bsim.helloworld --kotlin com.bsim.helloworld.client idl/helloworld.toml
+jcrpc-gen --java com.example.applet.helloworld --kotlin com.example.applet.helloworld.client idl/helloworld.toml
 ```
 
 ## The two-class applet split
@@ -57,9 +57,9 @@ java --add-modules java.smartcardio -cp "build:gp.jar" GpT0 install \
 jc-harness smoke --reader OMNIKEY --aid F0000000AA01 --apdu B0020000
 ```
 
-## The physical-card bridge daemon (bsim-pcsc-bridge-go)
+## The physical-card bridge daemon (example-applet-pcsc-bridge-go)
 
-For an Android/iOS dev loop, `javacard-rpc-client-kotlin`'s `TCPTransport`/`javacard-rpc-client-swift`'s equivalent point at a TCP bridge instead of talking PC/SC directly (an emulator can't reach a USB reader; iOS apps can't reach one at all without MFi certification). `bsim-pcsc-bridge-go` implements the exact same wire protocol as the reference Java bridge in `javacard-rpc` (`FrameCodec`/`MessageType`, byte-for-byte), backed by a real physical card instead of jCardSim, so the same client library works against either backend with zero client-side changes.
+For an Android/iOS dev loop, `javacard-rpc-client-kotlin`'s `TCPTransport`/`javacard-rpc-client-swift`'s equivalent point at a TCP bridge instead of talking PC/SC directly (an emulator can't reach a USB reader; iOS apps can't reach one at all without MFi certification). `example-applet-pcsc-bridge-go` implements the exact same wire protocol as the reference Java bridge in `javacard-rpc` (`FrameCodec`/`MessageType`, byte-for-byte), backed by a real physical card instead of jCardSim, so the same client library works against either backend with zero client-side changes.
 
 Two bugs specific to that daemon, worth knowing if you build something similar:
 
